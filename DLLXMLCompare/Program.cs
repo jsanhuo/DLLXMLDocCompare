@@ -38,9 +38,40 @@ namespace DLLXMLCompare
             // var dllAndXml = getArgs(args);
             var dllFile = "D:\\1228TEMP\\test.dll";
             var xmlFile = "D:\\1228TEMP\\test.xml";
-            compare(dllFile, xmlFile);
+            var valueTuple = compare(dllFile, xmlFile);
+            var inDllNotInXml = valueTuple.Item1;
+            var inXmlNotInDll = valueTuple.Item2;
+            
+            ProcessXML(xmlFile, "D:\\1228TEMP\\test1.xml", inXmlNotInDll);
         }
-
+        
+        static void ProcessXML(string xmlFile,string saveXml, Dictionary<string,List<string>> inXmlNotInDll)
+        {
+            XDocument doc = XDocument.Load(xmlFile);
+            HashSet<string> hashSet = new HashSet<string>();
+            foreach (var keyValuePair in inXmlNotInDll)
+            {
+                // 将所有的value放入hashSet
+                foreach (var value in keyValuePair.Value)
+                {
+                    hashSet.Add(value);
+                }
+            }
+            // 获取所有的member
+            var members = doc.Descendants("member").ToList();
+            foreach (var member in members)
+            {
+                string name = member.Attribute("name").Value;
+                string type = name.Substring(0, 2);
+                string value = name.Substring(2);
+                if (hashSet.Contains(value))
+                {
+                    Console.WriteLine($"Remove {name}");
+                    member.Remove();
+                }
+            }
+            doc.Save(saveXml);
+        }
 
         static Dictionary<string, List<string>> getDllMeta(string dllFile)
         {
@@ -77,32 +108,37 @@ namespace DLLXMLCompare
 
         private static void getDllTypeMeta(Type type, Dictionary<string, List<string>> dllMeta)
         {
-            Console.WriteLine($"Class: {type.FullName}");
-            dllMeta["Class"].Add(type.FullName);
+            var className = type.FullName.Replace("+", ".");
+            dllMeta["Class"].Add(className);
                     
             foreach (MethodInfo method in type.GetMethods(BindingFlags.Public | BindingFlags.Instance | BindingFlags.Static | BindingFlags.DeclaredOnly))
             {
-                dllMeta["Method"].Add(method.Name);
+                var methodName = className +"."+ method.Name;
+                dllMeta["Method"].Add(methodName);
             }
                     
             foreach (PropertyInfo property in type.GetProperties(BindingFlags.Public | BindingFlags.Instance | BindingFlags.Static | BindingFlags.DeclaredOnly))
             {
-                dllMeta["Property"].Add(property.Name);
+                var propertyName = className +"."+ property.Name;
+                dllMeta["Property"].Add(propertyName);
             }
                     
             foreach (FieldInfo field in type.GetFields(BindingFlags.Public | BindingFlags.Instance | BindingFlags.Static | BindingFlags.DeclaredOnly))
             {
-                dllMeta["Field"].Add(field.Name);
+                var fieldName = className +"."+ field.Name;
+                dllMeta["Field"].Add(fieldName);
             }
                     
             foreach (EventInfo eventInfo in type.GetEvents(BindingFlags.Public | BindingFlags.Instance | BindingFlags.Static | BindingFlags.DeclaredOnly))
             {
-                dllMeta["Event"].Add(eventInfo.Name);
+                var eventName = className +"."+ eventInfo.Name;
+                dllMeta["Event"].Add(eventName);
             }
                     
             foreach (ConstructorInfo constructor in type.GetConstructors(BindingFlags.Public | BindingFlags.Instance | BindingFlags.Static | BindingFlags.DeclaredOnly))
             {
-                dllMeta["Constructor"].Add(constructor.Name);
+                var constructorName = className +"."+ constructor.Name;
+                dllMeta["Constructor"].Add(constructorName);
             }
                     
             foreach (Type nestedType in type.GetNestedTypes(BindingFlags.Public | BindingFlags.Instance | BindingFlags.Static | BindingFlags.DeclaredOnly))
@@ -111,11 +147,150 @@ namespace DLLXMLCompare
             }
         }
 
-        static void compare(string dllFile, string xmlFile)
+        static (Dictionary<string, List<string>>, Dictionary<string, List<string>>) compare(string dllFile, string xmlFile)
         {
             var dllMeta = getDllMeta(dllFile);
             var xmlMeta = getXmlMeta(xmlFile);
-            Console.WriteLine("END");
+            
+            // 比较class
+            Dictionary<string,List<string>> inDllNotInXml = new Dictionary<string, List<string>>()
+            {
+                ["Class"] = [],
+                ["Method"] = [],
+                ["Property"] = [],
+                ["Field"] = [],
+                ["Event"] = [],
+                ["Constructor"] = []
+            };
+            Dictionary<string,List<string>> inXmlNotInDll = new Dictionary<string, List<string>>()
+            {
+                ["Class"] = [],
+                ["Method"] = [],
+                ["Property"] = [],
+                ["Field"] = [],
+                ["Event"] = [],
+                ["Constructor"] = []
+            };
+            var dllClass = dllMeta["Class"];
+            var xmlClass = xmlMeta["T:"];
+            foreach (var className in dllClass)
+            {
+                if (!xmlClass.Contains(className))
+                {
+                    inDllNotInXml["Class"].Add(className);
+                }
+            }
+            foreach (var className in xmlClass)
+            {
+                if (!dllClass.Contains(className))
+                {
+                    inXmlNotInDll["Class"].Add(className);
+                }
+            }
+            // 比较method
+            var dllMethod = dllMeta["Method"];
+            var xmlMethod = xmlMeta["M:"];
+            foreach (var dllMethodName in dllMethod)
+            {
+                var found = false;
+                foreach (var xmlMethodName in xmlMethod)
+                {
+                    if (xmlMethodName.StartsWith(dllMethodName))
+                    {
+                        found = true;
+                        break;
+                    }
+                }
+                // XML中没有
+                if (!found)
+                {
+                    inDllNotInXml["Method"].Add(dllMethodName);
+                }
+            }
+            foreach (var xmlMethodName in xmlMethod)
+            {
+                if(xmlMethodName.Contains("#ctor"))
+                {
+                    // 判断是否有这个类
+                    var className = xmlMethodName.Split(".#ctor")[0];
+                    if (!dllClass.Contains(className))
+                    {
+                        inXmlNotInDll["Method"].Add(xmlMethodName);
+                    }
+                }
+                else
+                {
+                    var found = false;
+                    foreach (var dllMethodName in dllMethod)
+                    {
+                        if (xmlMethodName.StartsWith(dllMethodName))
+                        {
+                            found = true;
+                            break;
+                        }
+                    }
+                    // DLL中没有
+                    if (!found)
+                    {
+                        inXmlNotInDll["Method"].Add(xmlMethodName);
+                    }
+                }
+                
+            }
+            
+            // 比较property
+            var dllProperty = dllMeta["Property"];
+            var xmlProperty = xmlMeta["P:"];
+            foreach (var dllPropertyName in dllProperty)
+            {
+               if(!xmlProperty.Contains(dllPropertyName))
+               {
+                   inDllNotInXml["Property"].Add(dllPropertyName);
+               }
+            }
+            foreach (var xmlPropertyName in xmlProperty)
+            {
+                if(!dllProperty.Contains(xmlPropertyName))
+                {
+                    inXmlNotInDll["Property"].Add(xmlPropertyName);
+                }
+            }
+            // 比较field
+            var dllField = dllMeta["Field"];
+            var xmlField = xmlMeta["F:"];
+            foreach (var dllFieldName in dllField)
+            {
+                if(!xmlField.Contains(dllFieldName))
+                {
+                    inDllNotInXml["Field"].Add(dllFieldName);
+                }
+            }
+            foreach (var xmlFieldName in xmlField)
+            {
+                if(!dllField.Contains(xmlFieldName))
+                {
+                    inXmlNotInDll["Field"].Add(xmlFieldName);
+                }
+            }
+            
+            // 比较event
+            var dllEvent = dllMeta["Event"];
+            var xmlEvent = xmlMeta["E:"];
+            foreach (var dllEventName in dllEvent)
+            {
+                if(!xmlEvent.Contains(dllEventName))
+                {
+                    inDllNotInXml["Event"].Add(dllEventName);
+                }
+            }
+            foreach (var xmlEventName in xmlEvent)
+            {
+                if(!dllEvent.Contains(xmlEventName))
+                {
+                    inXmlNotInDll["Event"].Add(xmlEventName);
+                }
+            }
+            return (inDllNotInXml, inXmlNotInDll);
         }
 
         private static Dictionary<string, List<string>> getXmlMeta(string xmlFile)
